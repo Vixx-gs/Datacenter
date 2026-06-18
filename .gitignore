@@ -1,0 +1,44 @@
+# Entorno virtual
+venv/
+.venv/
+env/
+
+# Variables de entorno y secretos
+.env
+*.env
+*.json.key
+*-adminsdk-*.json
+*firebase*.json
+*service_account*.json
+*credentials*.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+
+# Claude Code
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Credenciales de acceso
+auth.py
+
+# Logs
+*.log
+logs/
+
+# Cache de disco (Firebase)
+cache/
