@@ -1,4 +1,4 @@
-# Entorno virtual
+﻿# Entorno virtual
 venv/
 .venv/
 env/
@@ -32,9 +32,6 @@ build/
 # OS
 .DS_Store
 Thumbs.db
-
-# Credenciales de acceso
-auth.py
 
 # Logs
 *.log
