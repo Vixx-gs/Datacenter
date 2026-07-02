@@ -78,25 +78,59 @@ def get_historial_vehiculo(
     db = Depends(get_db),
     _: str = Depends(verificar_token)
 ):
-    docs = (
+    docs = list(
         db.collection("driverAssignments")
           .where("vehicleId", "==", matricula)
           .stream()
     )
-    registros = [
-        {
+
+    def parece_id(s: str) -> bool:
+        """True si el string parece un ID técnico en vez de un nombre real."""
+        if not s or s == "—":
+            return True
+        # Sin espacios y todo alfanumérico → probablemente un ID
+        return " " not in s.strip() and s.replace("-", "").isalnum() and len(s) < 30
+
+    # Recoger driver_ids que necesitan resolución
+    driver_ids_a_resolver = set()
+    raw = []
+    for doc in docs:
+        d = doc.to_dict()
+        driver_name = d.get("driverName", "") or ""
+        driver_id   = d.get("driverId", "") or ""
+        raw.append({
             "id":           doc.id,
-            "vehiculo_id":  doc.to_dict().get("vehicleId", ""),
-            "conductor_id": doc.to_dict().get("driverId", ""),
-            "nombre":       doc.to_dict().get("driverName", "—"),
-            "fecha_inicio": doc.to_dict().get("fechaInicio", ""),
-            "fecha_fin":    doc.to_dict().get("fechaFin", ""),
-            "accion":       doc.to_dict().get("accion", ""),
-        }
-        for doc in docs
-    ]
-    registros.sort(key=lambda x: x["fecha_inicio"] or "", reverse=True)
-    return registros
+            "vehiculo_id":  d.get("vehicleId", ""),
+            "conductor_id": driver_id,
+            "nombre":       driver_name,
+            "fecha_inicio": d.get("fechaInicio", ""),
+            "fecha_fin":    d.get("fechaFin", ""),
+            "accion":       d.get("accion", ""),
+        })
+        if parece_id(driver_name) and driver_id:
+            driver_ids_a_resolver.add(driver_id)
+
+    # Resolver nombres en batch
+    nombres_por_id: dict = {}
+    for driver_id in driver_ids_a_resolver:
+        client_doc = db.collection("clients").document(driver_id).get()
+        if client_doc.exists:
+            nombres_por_id[driver_id] = client_doc.to_dict().get("nombre", driver_id)
+        else:
+            # Buscar por campo driverId dentro de clients
+            hits = list(db.collection("clients").where("driverId", "==", driver_id).limit(1).stream())
+            if hits:
+                nombres_por_id[driver_id] = hits[0].to_dict().get("nombre", driver_id)
+
+    # Aplicar nombres resueltos
+    for r in raw:
+        if parece_id(r["nombre"]) and r["conductor_id"] in nombres_por_id:
+            r["nombre"] = nombres_por_id[r["conductor_id"]]
+        if not r["nombre"] or r["nombre"] == "—":
+            r["nombre"] = "—"
+
+    raw.sort(key=lambda x: x["fecha_inicio"] or "", reverse=True)
+    return raw
 
 @router.get("/{matricula}/conductor-detalle")
 def get_conductor_detalle(
