@@ -145,7 +145,7 @@ def sync_clientes(db, rows_clientes, rows_historial):
         apellidos     = clean(row.get("APELLIDOS", ""))
         num_socio     = clean(row.get("CODIGO", ""))
         nombre_propio = clean(row.get("NOMBRE PROPIO", "")) or clean(row.get("Nombre", ""))
-        gestor        = clean(row.get("GESTOR", "") or row.get("Comercial", ""))
+        gestor        = clean(row.get("GESTOR", "")).upper()
         fecha_baja    = clean(row.get("FECHA BAJA", ""))
 
         # Determinar estado real del conductor
@@ -393,7 +393,7 @@ def sync_historial(db, rows):
         else:
             con_fecha = [r for r in registros if r["fecha_fin"] and r["conductor_id"]]
             if con_fecha:
-                ultimo = sorted(con_fecha, key=lambda x: x["fecha_fin"], reverse=True)[0]
+                ultimo = sorted(con_fecha, key=lambda x: parse_fecha(x["fecha_fin"]) or datetime.min, reverse=True)[0]
                 conductor = db.query(models.Conductor).filter(models.Conductor.id == ultimo["conductor_id"]).first()
                 if conductor:
                     db.query(models.Vehiculo).filter(models.Vehiculo.matricula == matricula).update({
@@ -408,7 +408,7 @@ def sync_historial(db, rows):
     for matricula, registros in vehiculos_map.items():
         con_fecha = [r for r in registros if r["fecha_fin"] and r["conductor_id"]]
         if con_fecha and not any(not r["fecha_fin"] for r in registros):
-            ultimo = sorted(con_fecha, key=lambda x: x["fecha_fin"], reverse=True)[0]
+            ultimo = sorted(con_fecha, key=lambda x: parse_fecha(x["fecha_fin"]) or datetime.min, reverse=True)[0]
             cid = ultimo["conductor_id"]
             if cid not in conductor_vehiculos and cid not in conductores_sin_activo:
                 conductores_sin_activo.add(cid)

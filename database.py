@@ -1,22 +1,15 @@
-from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
-import os
+from google.cloud import firestore
+from google.oauth2.service_account import Credentials
+from pathlib import Path
 
-load_dotenv()
+_SA = Path(__file__).parent / "firebase_migration" / "ai-studio-applet-webapp-55a1a-firebase-adminsdk-fbsvc-827f939cd7.json"
 
-DATABASE_URL = os.getenv("DATABASE_URL")
-# Cambia postgresql:// por postgresql+pg8000://
-DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+pg8000://")
-
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+_creds = Credentials.from_service_account_file(str(_SA))
+db = firestore.Client(
+    project     = "ai-studio-applet-webapp-55a1a",
+    credentials = _creds,
+    database    = "ai-studio-7801edee-96c4-47bb-8194-68abcf65e834",
+)
 
 def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+    return db

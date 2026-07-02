@@ -1,46 +1,64 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from typing import List, Optional
 from database import get_db
-from auth import verificar_token
-import models, schemas, uuid
+from typing import List, Optional
+import schemas, uuid
 
 router = APIRouter(prefix="/telefonos", tags=["telefonos"])
+
+
+def _map(doc_id: str, d: dict) -> dict:
+    return {
+        "id":        doc_id,
+        "telefono":  d.get("telefono", ""),
+        "extension": d.get("extension", ""),
+        "persona":   d.get("persona", ""),
+        "empresa":   d.get("empresa", ""),
+        "email":     d.get("email", ""),
+        "pertenece": d.get("pertenece", ""),
+        "area":      d.get("area", ""),
+        "created_at": None,
+    }
+
 
 @router.get("/", response_model=List[schemas.TelefonoOut])
 def get_telefonos(
     empresa: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
+    db = Depends(get_db),
 ):
-    q = db.query(models.Telefono)
-    if empresa: q = q.filter(models.Telefono.empresa == empresa)
-    return q.order_by(models.Telefono.empresa, models.Telefono.extension).all()
+    docs = db.collection("telefonos").stream()
+    result = []
+    for doc in docs:
+        d = doc.to_dict()
+        if empresa and d.get("empresa", "") != empresa:
+            continue
+        result.append(_map(doc.id, d))
+    result.sort(key=lambda x: (x["empresa"] or "", x["extension"] or ""))
+    return result
+
 
 @router.post("/", response_model=schemas.TelefonoOut)
-def create_telefono(telefono: schemas.TelefonoCreate, db: Session = Depends(get_db)):
-    data = telefono.model_dump()
-    if not data.get("id"):
-        data["id"] = str(uuid.uuid4())
-    db_t = models.Telefono(**data)
-    db.add(db_t); db.commit(); db.refresh(db_t)
-    return db_t
+def create_telefono(telefono: schemas.TelefonoCreate, db = Depends(get_db)):
+    data   = telefono.model_dump()
+    doc_id = data.get("id") or str(uuid.uuid4())
+    fs_data = {k: v for k, v in data.items() if k != "id" and v is not None}
+    db.collection("telefonos").document(doc_id).set(fs_data)
+    return _map(doc_id, fs_data)
+
 
 @router.put("/{id}", response_model=schemas.TelefonoOut)
-def update_telefono(id: str, telefono: schemas.TelefonoCreate, db: Session = Depends(get_db)):
-    db_t = db.query(models.Telefono).filter(models.Telefono.id == id).first()
-    if not db_t:
+def update_telefono(id: str, telefono: schemas.TelefonoCreate, db = Depends(get_db)):
+    ref = db.collection("telefonos").document(id)
+    if not ref.get().exists:
         raise HTTPException(status_code=404, detail="Teléfono no encontrado")
-    data = telefono.model_dump(exclude_unset=True)
-    data.pop("id", None)
-    for k, v in data.items():
-        setattr(db_t, k, v)
-    db.commit(); db.refresh(db_t)
-    return db_t
+    data = {k: v for k, v in telefono.model_dump(exclude_unset=True).items() if k != "id"}
+    ref.update(data)
+    return _map(id, ref.get().to_dict())
+
 
 @router.delete("/{id}")
-def delete_telefono(id: str, db: Session = Depends(get_db)):
-    db_t = db.query(models.Telefono).filter(models.Telefono.id == id).first()
-    if not db_t:
+def delete_telefono(id: str, db = Depends(get_db)):
+    ref = db.collection("telefonos").document(id)
+    if not ref.get().exists:
         raise HTTPException(status_code=404, detail="Teléfono no encontrado")
-    db.delete(db_t); db.commit()
+    ref.delete()
     return {"ok": True}

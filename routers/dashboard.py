@@ -1,309 +1,268 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.orm import Session
 from database import get_db
 from auth import verificar_token
-import models, schemas
 from datetime import datetime, timedelta
 from typing import Optional
+import sheets_cache as sc
+import firestore_cache as fc
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
-def parse_fecha_conductor(f: str) -> Optional[datetime]:
-    if not f or not f.strip():
-        return None
-    fecha_str = f.strip().split(' ')[0]
-    for fmt in ("%d/%m/%Y", "%d/%m/%y"):
-        try:
-            return datetime.strptime(fecha_str, fmt)
-        except:
-            continue
+def parse_fecha(f: str):
+    if not f or not f.strip(): return None
+    s = f.strip().split("T")[0].split(" ")[0]
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d/%m/%y"):
+        try: return datetime.strptime(s, fmt)
+        except: pass
     return None
 
-def contar_en_taller(db):
-    todos = db.query(models.TallerEntrada).all()
-    count = 0
-    hoy = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    for t in todos:
-        fecha_fin = t.fecha_fin
-        if not fecha_fin or not fecha_fin.strip():
-            count += 1
-            continue
-        try:
-            fd = datetime.strptime(fecha_fin.strip(), "%d/%m/%Y")
-            if fd >= hoy:
-                count += 1
-        except:
-            pass
-    return count
-
-def get_socios_rango(db, campo: str, desde: datetime, hasta: datetime):
-    """Devuelve conductores cuya fecha (campo) cae en el rango dado."""
-    todos = db.query(models.Conductor).filter(
-        models.Conductor.estado == "Confirmado",
-        models.Conductor.codigo_socio == "DEFINITIVO",
-    ).all()
-    resultado = []
-    for c in todos:
-        valor = getattr(c, campo, None)
-        fd = parse_fecha_conductor(valor)
-        if fd and desde <= fd <= hasta:
-            resultado.append(c)
-    return resultado
-
-def get_bajas_rango(db, desde: datetime, hasta: datetime):
-    """Devuelve conductores con fecha_baja en el rango dado."""
-    todos = db.query(models.Conductor).all()
-    resultado = []
-    for c in todos:
-        fd = parse_fecha_conductor(c.fecha_baja)
-        if fd and desde <= fd <= hasta:
-            resultado.append(c)
-    return resultado
-
-def format_conductor(c) -> dict:
+def _map_conductor(doc_id: str, d: dict) -> dict:
     return {
-        "id":              c.id,
-        "nombre":          c.nombre,
-        "apellidos":       c.apellidos or "",
-        "nif":             c.nif,
-        "movil":           c.movil,
-        "email":           c.email,
-        "empresa":         c.empresa,
-        "gestor":          c.gestor,
-        "fecha_inicio":    c.fecha_inicio,
-        "fecha_prevista":  getattr(c, 'fecha_prevista', None),
-        "fecha_baja":      c.fecha_baja,
-        "vehiculo":        c.vehiculo,
-        "num_socio":       c.num_socio,
+        "id":             doc_id,
+        "nombre":         d.get("nombre", ""),
+        "apellidos":      d.get("apellidos", ""),
+        "nif":            d.get("nif", ""),
+        "movil":          d.get("movil", ""),
+        "email":          d.get("email", ""),
+        "empresa":        d.get("empresa", ""),
+        "gestor":         d.get("gestor", ""),
+        "fecha_inicio":   d.get("fechaAlta", ""),
+        "fecha_prevista": d.get("fechaIngreso", ""),
+        "fecha_baja":     d.get("fechaBaja", ""),
+        "estado":         d.get("estado", ""),
+        "codigo_socio":   d.get("situacion", ""),
+        "num_socio":      d.get("codigo", ""),
+        "vehiculo":       "",
     }
 
-@router.get("/stats", response_model=schemas.DashboardStats)
-def get_stats(db: Session = Depends(get_db), _: str = Depends(verificar_token)):
-    hoy  = datetime.now()
+EMPRESAS_VALIDAS = {"ECOTRANSPORTE", "TRANSCOOP", "CENTRALCOOP"}
+
+def _all_conductores(db=None) -> list:
+    return [
+        _map_conductor(doc_id, d)
+        for doc_id, d in fc.get_clients()
+        if d.get("empresa", "").upper() in EMPRESAS_VALIDAS
+    ]
+
+def _all_entradas_taller(db=None) -> list:
+    return [d for _, d in fc.get_workshop_entries()]
+
+def contar_en_taller(db) -> int:
+    hoy  = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    count = 0
+    for d in _all_entradas_taller(db):
+        ff = d.get("fechaFin", "")
+        if not ff or not ff.strip():
+            count += 1
+            continue
+        fd = parse_fecha(ff)
+        if fd and fd >= hoy:
+            count += 1
+    return count
+
+def socios_rango(conductores: list, campo: str, desde: datetime, hasta: datetime) -> list:
+    result = []
+    for c in conductores:
+        if c.get("estado", "").lower() != "confirmado":    continue
+        if c.get("codigo_socio", "").upper() != "definitivo".upper() and c.get("codigo_socio", "").upper() != "DEFINITIVO": continue
+        fd = parse_fecha(c.get(campo, ""))
+        if fd and desde <= fd <= hasta:
+            result.append(c)
+    return result
+
+def bajas_rango(conductores: list, desde: datetime, hasta: datetime) -> list:
+    result = []
+    for c in conductores:
+        fd = parse_fecha(c.get("fecha_baja", ""))
+        if fd and desde <= fd <= hasta:
+            result.append(c)
+    return result
+
+def _count_activos_hasta(conductores: list, hasta: datetime, empresa: str = "TODAS") -> int:
+    n = 0
+    for c in conductores:
+        if empresa != "TODAS" and c.get("empresa", "").upper() != empresa.upper():
+            continue
+        codigo = c.get("codigo_socio", "").upper()
+        if codigo not in ("DEFINITIVO", "PERDIDO"):
+            continue
+        if codigo == "PERDIDO" and not c.get("fecha_baja"):
+            continue
+        _fechas = [d for d in [parse_fecha(c.get("fecha_prevista")), parse_fecha(c.get("fecha_inicio"))] if d]
+        fi = min(_fechas) if _fechas else None
+        fb = parse_fecha(c.get("fecha_baja")) if c.get("fecha_baja") else None
+        if fi and fi <= hasta:
+            if fb is None or fb > hasta:
+                n += 1
+    return n
+
+@router.get("/stats")
+def get_stats(db = Depends(get_db), _: str = Depends(verificar_token)):
+    import schemas
+    hoy    = datetime.now()
     hace30 = hoy - timedelta(days=30)
-    altas = get_socios_rango(db, "fecha_prevista", hace30, hoy)
-    bajas = get_bajas_rango(db, hace30, hoy)
+    conductores = _all_conductores(db)
+
+    confirmados = [c for c in conductores
+                   if c["estado"].lower() == "confirmado"
+                   and c["codigo_socio"].upper() == "DEFINITIVO"]
+
+    total_veh = sum(1 for _ in db.collection("vehicles").stream())
+    activos_v = sum(1 for doc in db.collection("vehicles").stream()
+                    if doc.to_dict().get("estado", "").upper() == "ACTIVO")
+    # Seguros: leídos de Sheets (caché 5 min) — insurancePolicies en Firebase puede estar vacía
+    hoy_dt    = datetime.now()
+    seguros_a = sum(
+        1 for row in sc.get_seguros()
+        if sc.clean(row.get("Estado", "")).upper() == "ACTIVO"
+        and (not sc.parse_fecha(sc.clean(row.get("Fecha de Vencimiento", "")))
+             or sc.parse_fecha(sc.clean(row.get("Fecha de Vencimiento", ""))) >= hoy_dt)
+    )
+
+    altas = socios_rango(conductores, "fecha_prevista", hace30, hoy)
+    bajas = bajas_rango(conductores, hace30, hoy)
+
     return {
-        "total_vehiculos":     db.query(models.Vehiculo).count(),
-        "vehiculos_activos":   db.query(models.Vehiculo).filter(models.Vehiculo.estado == "ACTIVO").count(),
-        "total_conductores":   db.query(models.Conductor).filter(models.Conductor.estado == "Confirmado", models.Conductor.codigo_socio == "DEFINITIVO").count(),
-        "conductores_activos": db.query(models.Conductor).filter(models.Conductor.estado == "Confirmado", models.Conductor.codigo_socio == "DEFINITIVO").count(),
-        "seguros_activos":     db.query(models.Seguro).filter(models.Seguro.estado == "ACTIVO").count(),
+        "total_vehiculos":     total_veh,
+        "vehiculos_activos":   activos_v,
+        "total_conductores":   len(confirmados),
+        "conductores_activos": len(confirmados),
+        "seguros_activos":     seguros_a,
         "vehiculos_en_taller": contar_en_taller(db),
         "socios_nuevos":       len(altas),
         "socios_bajas":        len(bajas),
-        "transcoop":           db.query(models.Conductor).filter(models.Conductor.empresa == "TRANSCOOP",     models.Conductor.estado == "Confirmado", models.Conductor.codigo_socio == "DEFINITIVO").count(),
-        "ecotransporte":       db.query(models.Conductor).filter(models.Conductor.empresa == "ECOTRANSPORTE", models.Conductor.estado == "Confirmado", models.Conductor.codigo_socio == "DEFINITIVO").count(),
-        "centralcoop":         db.query(models.Conductor).filter(models.Conductor.empresa == "CENTRALCOOP",   models.Conductor.estado == "Confirmado", models.Conductor.codigo_socio == "DEFINITIVO").count(),
+        "transcoop":    sum(1 for c in confirmados if c["empresa"].upper() == "TRANSCOOP"),
+        "ecotransporte":sum(1 for c in confirmados if c["empresa"].upper() == "ECOTRANSPORTE"),
+        "centralcoop":  sum(1 for c in confirmados if c["empresa"].upper() == "CENTRALCOOP"),
     }
-
 
 @router.get("/socios-altas")
 def get_socios_altas(
     rango: str = Query("mes"),
-    mes: int = Query(None),
+    mes:  int = Query(None),
     anio: int = Query(None),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
     _: str = Depends(verificar_token)
 ):
     hoy = datetime.now()
     if rango == "semana":
-        fecha_desde = hoy - timedelta(days=7)
-        fecha_hasta = hoy
+        fd, fh = hoy - timedelta(days=7), hoy
     elif rango == "mes_selector" and mes and anio:
-        fecha_desde = datetime(anio, mes, 1)
-        fecha_hasta = datetime(anio + (1 if mes == 12 else 0), (mes % 12) + 1, 1) - timedelta(seconds=1)
+        fd = datetime(anio, mes, 1)
+        fh = datetime(anio + (1 if mes == 12 else 0), (mes % 12) + 1, 1) - timedelta(seconds=1)
     elif rango == "anio_selector" and anio:
-        fecha_desde = datetime(anio, 1, 1)
-        fecha_hasta = datetime(anio, 12, 31, 23, 59, 59)
-    else:  # mes = últimos 30 días
-        fecha_desde = hoy - timedelta(days=30)
-        fecha_hasta = hoy
-    socios = get_socios_rango(db, "fecha_prevista", fecha_desde, fecha_hasta)
-    return [format_conductor(c) for c in sorted(socios, key=lambda x: x.fecha_prevista or "", reverse=True)]
+        fd, fh = datetime(anio, 1, 1), datetime(anio, 12, 31, 23, 59, 59)
+    else:
+        fd, fh = hoy - timedelta(days=30), hoy
+    socios = socios_rango(_all_conductores(db), "fecha_prevista", fd, fh)
+    return sorted(socios, key=lambda x: x["fecha_prevista"] or "", reverse=True)
 
 @router.get("/socios-bajas")
 def get_socios_bajas(
     rango: str = Query("mes"),
-    mes: int = Query(None),
+    mes:  int = Query(None),
     anio: int = Query(None),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
     _: str = Depends(verificar_token)
 ):
     hoy = datetime.now()
     if rango == "semana":
-        fecha_desde = hoy - timedelta(days=7)
-        fecha_hasta = hoy
+        fd, fh = hoy - timedelta(days=7), hoy
     elif rango == "mes_selector" and mes and anio:
-        fecha_desde = datetime(anio, mes, 1)
-        fecha_hasta = datetime(anio + (1 if mes == 12 else 0), (mes % 12) + 1, 1) - timedelta(seconds=1)
+        fd = datetime(anio, mes, 1)
+        fh = datetime(anio + (1 if mes == 12 else 0), (mes % 12) + 1, 1) - timedelta(seconds=1)
     elif rango == "anio_selector" and anio:
-        fecha_desde = datetime(anio, 1, 1)
-        fecha_hasta = datetime(anio, 12, 31, 23, 59, 59)
+        fd, fh = datetime(anio, 1, 1), datetime(anio, 12, 31, 23, 59, 59)
     else:
-        fecha_desde = hoy - timedelta(days=30)
-        fecha_hasta = hoy
-    socios = get_bajas_rango(db, fecha_desde, fecha_hasta)
-    return [format_conductor(c) for c in sorted(socios, key=lambda x: x.fecha_baja or "", reverse=True)]
+        fd, fh = hoy - timedelta(days=30), hoy
+    bajas = bajas_rango(_all_conductores(db), fd, fh)
+    return sorted(bajas, key=lambda x: x["fecha_baja"] or "", reverse=True)
 
 @router.get("/evolucion-socios")
 def get_evolucion_socios(
-    modo: str = Query("mes"),          # mes | anio | personalizado
+    modo: str = Query("mes"),
     anio: int = Query(None),
     cooperativa: str = Query("TODAS"),
-    desde: str = Query(None),          # dd/mm/yyyy para modo personalizado
+    desde: str = Query(None),
     hasta: str = Query(None),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
     _: str = Depends(verificar_token)
 ):
-    from collections import defaultdict
-
     hoy = datetime.now()
-    anio_consulta = anio or hoy.year
+    anio_c = anio or hoy.year
+    conductores = _all_conductores(db)
 
-    # Filtro cooperativa
-    q = db.query(models.Conductor).filter(
-        models.Conductor.estado == "Confirmado",
-        models.Conductor.codigo_socio == "DEFINITIVO",
-        models.Conductor.fecha_inicio != None,
-        models.Conductor.fecha_inicio != ""
-    )
-    if cooperativa != "TODAS":
-        q = q.filter(models.Conductor.empresa == cooperativa)
-
-    conductores = q.all()
+    def count_activos(fin: datetime) -> int:
+        return _count_activos_hasta(conductores, fin, cooperativa)
 
     if modo == "personalizado" and desde and hasta:
-        # Muestra día a día entre las dos fechas (máx 366 puntos)
-        fd = parse_fecha_conductor(desde)
-        fh = parse_fecha_conductor(hasta)
-        if not fd or not fh or fd > fh:
-            return []
-        resultado = []
+        fd = parse_fecha(desde)
+        fh = parse_fecha(hasta)
+        if not fd or not fh or fd > fh: return []
         delta = (fh - fd).days + 1
-        # Si el rango es grande, agrupar por semana
+        resultado = []
         if delta > 60:
-            # Agrupar por semana
             semana = fd
             while semana <= fh:
                 fin_sem = min(semana + timedelta(days=6), fh)
-                count = 0
-                for c in conductores:
-                    fi = parse_fecha_conductor(c.fecha_inicio)
-                    fb = parse_fecha_conductor(c.fecha_baja) if c.fecha_baja else None
-                    if fi and fi <= fin_sem:
-                        if fb is None or fb >= semana:
-                            count += 1
-                resultado.append({"label": semana.strftime("%d/%m"), "valor": count, "periodo": semana.strftime("%d/%m/%Y")})
+                resultado.append({"label": semana.strftime("%d/%m"), "valor": count_activos(fin_sem), "periodo": semana.strftime("%d/%m/%Y")})
                 semana += timedelta(days=7)
         else:
-            # Día a día
             for i in range(delta):
                 dia = fd + timedelta(days=i)
-                count = 0
-                for c in conductores:
-                    fi = parse_fecha_conductor(c.fecha_inicio)
-                    fb = parse_fecha_conductor(c.fecha_baja) if c.fecha_baja else None
-                    if fi and fi <= dia:
-                        if fb is None or fb >= dia:
-                            count += 1
-                resultado.append({"label": dia.strftime("%d/%m"), "valor": count, "periodo": dia.strftime("%d/%m/%Y")})
+                resultado.append({"label": dia.strftime("%d/%m"), "valor": count_activos(dia), "periodo": dia.strftime("%d/%m/%Y")})
         return resultado
 
     elif modo == "mes":
-        # Para cada mes del año, contar cuántos socios estaban activos
-        # Un socio estaba activo en un mes si: fecha_inicio <= fin_mes y (no tiene fecha_baja o fecha_baja > inicio_mes)
+        nombres = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
         resultado = []
-        meses_nombres = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
         for m in range(1, 13):
-            inicio_mes = datetime(anio_consulta, m, 1)
-            if m == 12:
-                fin_mes = datetime(anio_consulta + 1, 1, 1) - timedelta(seconds=1)
-            else:
-                fin_mes = datetime(anio_consulta, m + 1, 1) - timedelta(seconds=1)
-
-            # No mostrar meses futuros
-            if inicio_mes > hoy:
-                break
-
-            count = 0
-            for c in conductores:
-                fi = parse_fecha_conductor(c.fecha_inicio)
-                fb = parse_fecha_conductor(c.fecha_baja) if c.fecha_baja else None
-                if fi and fi <= fin_mes:
-                    if fb is None or fb >= inicio_mes:
-                        count += 1
-
-            resultado.append({"label": meses_nombres[m-1], "valor": count, "periodo": f"{m:02d}/{anio_consulta}"})
+            inicio = datetime(anio_c, m, 1)
+            if inicio > hoy: break
+            fin = datetime(anio_c, m+1, 1) - timedelta(seconds=1) if m < 12 else datetime(anio_c, 12, 31, 23, 59, 59)
+            resultado.append({"label": nombres[m-1], "valor": count_activos(min(fin, hoy)), "periodo": f"{m:02d}/{anio_c}"})
         return resultado
 
-    else:  # modo anio
+    else:  # anio
         resultado = []
         for a in range(2020, hoy.year + 1):
-            fin_anio = datetime(a, 12, 31, 23, 59, 59)
-            inicio_anio = datetime(a, 1, 1)
-            if inicio_anio > hoy:
-                break
-            count = 0
-            for c in conductores:
-                fi = parse_fecha_conductor(c.fecha_inicio)
-                fb = parse_fecha_conductor(c.fecha_baja) if c.fecha_baja else None
-                if fi and fi <= fin_anio:
-                    if fb is None or fb >= inicio_anio:
-                        count += 1
-            resultado.append({"label": str(a), "valor": count, "periodo": str(a)})
+            if datetime(a, 1, 1) > hoy: break
+            fin = datetime(a, 12, 31, 23, 59, 59)
+            resultado.append({"label": str(a), "valor": count_activos(min(fin, hoy)), "periodo": str(a)})
         return resultado
 
 @router.get("/socios-evolucion")
 def get_socios_evolucion(
-    modo: str = Query("dia"),          # dia | mes | anio
-    mes: int = Query(None),
+    modo: str = Query("dia"),
+    mes:  int = Query(None),
     anio: int = Query(None),
     cooperativa: str = Query("TODAS"),
-    db: Session = Depends(get_db),
+    db = Depends(get_db),
     _: str = Depends(verificar_token)
 ):
-    hoy = datetime.now()
+    hoy    = datetime.now()
     mes_c  = mes  or hoy.month
     anio_c = anio or hoy.year
-
-    # DEFINITIVO activos + PERDIDO que tienen fecha_baja (para reflejar bajas reales)
-    q_activos = db.query(models.Conductor).filter(
-        models.Conductor.codigo_socio.in_(["DEFINITIVO", "PERDIDO"])
-    )
-    if cooperativa != "TODAS":
-        q_activos = q_activos.filter(models.Conductor.empresa == cooperativa)
-    conductores = q_activos.all()
+    conductores = _all_conductores(db)
 
     def count_activos(hasta: datetime) -> int:
-        n = 0
-        for c in conductores:
-            # PERDIDO sin fecha_baja = error de datos, no contar
-            if c.codigo_socio == "PERDIDO" and not c.fecha_baja:
-                continue
-            _fechas = [d for d in [parse_fecha_conductor(c.fecha_prevista), parse_fecha_conductor(c.fecha_inicio)] if d]
-            fi = min(_fechas) if _fechas else None
-            fb = parse_fecha_conductor(c.fecha_baja) if c.fecha_baja else None
-            if fi and fi <= hasta:
-                if fb is None or fb > hasta:
-                    n += 1
-        return n
+        return _count_activos_hasta(conductores, hasta, cooperativa)
 
     if modo == "anio":
         resultado = []
         for a in range(2020, hoy.year + 1):
-            hasta = datetime(a, 12, 31, 23, 59, 59)
             if datetime(a, 1, 1) > hoy: break
+            hasta = datetime(a, 12, 31, 23, 59, 59)
             resultado.append({"label": str(a), "valor": count_activos(min(hasta, hoy))})
         return resultado
 
     elif modo == "mes":
-        meses_nombres = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
+        nombres = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
         resultado = []
         for m in range(1, 13):
-            h = datetime(anio_c, m+1, 1) - timedelta(seconds=1) if m < 12 else datetime(anio_c, 12, 31, 23, 59, 59)
             if datetime(anio_c, m, 1) > hoy: break
-            resultado.append({"label": meses_nombres[m-1], "valor": count_activos(min(h, hoy))})
+            h = datetime(anio_c, m+1, 1) - timedelta(seconds=1) if m < 12 else datetime(anio_c, 12, 31, 23, 59, 59)
+            resultado.append({"label": nombres[m-1], "valor": count_activos(min(h, hoy))})
         return resultado
 
     else:  # dia
@@ -313,7 +272,7 @@ def get_socios_evolucion(
             fin_mes = datetime(anio_c, mes_c + 1, 1) - timedelta(days=1)
         resultado = []
         for dia in range(1, fin_mes.day + 1):
-            fecha_dia = datetime(anio_c, mes_c, dia)
-            if fecha_dia > hoy: break
-            resultado.append({"label": str(dia), "valor": count_activos(fecha_dia)})
+            fd = datetime(anio_c, mes_c, dia)
+            if fd > hoy: break
+            resultado.append({"label": str(dia), "valor": count_activos(fd)})
         return resultado
