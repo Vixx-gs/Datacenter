@@ -30,6 +30,8 @@ def _map(doc_id: str, d: dict) -> dict:
         "fecha_fin_garantia":  d.get("fechaFinGarantia", ""),
         "km_fin_garantia":     str(d.get("kmFinGarantia", "") if d.get("kmFinGarantia") else ""),
         "kilometros":          str(d.get("kilometros", "") if d.get("kilometros") else ""),
+        "gps":                 d.get("gps", ""),
+        "origen":              d.get("origen", ""),
         "equipamiento":        d.get("equipamiento", ""),
         "observaciones":       d.get("observaciones", ""),
         "conductor_actual":    d.get("conductorActual", ""),
@@ -188,7 +190,8 @@ def update_vehiculo(
         "itv": "itv", "tacografo": "tacografo",
         "observaciones": "observaciones",
         "conductor_actual": "conductorActual",
-        "fecha_mat": "fechaMat", "equipamiento": "equipamiento",
+        "fecha_mat": "fechaMat", "gps": "gps", "origen": "origen",
+        "equipamiento": "equipamiento",
         "fecha_fin_mto": "fechaFinMto", "fecha_fin_garantia": "fechaFinGarantia",
     }
     update_data = {}

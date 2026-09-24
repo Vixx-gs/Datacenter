@@ -23,6 +23,8 @@ class VehiculoBase(BaseModel):
     fecha_fin_garantia: Optional[str] = None
     km_fin_garantia: Optional[str] = None
     kilometros: Optional[str] = None
+    gps: Optional[str] = None
+    origen: Optional[str] = None
     equipamiento: Optional[str] = None
     observaciones: Optional[str] = None
     conductor_actual: Optional[str] = None
