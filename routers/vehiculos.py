@@ -160,6 +160,25 @@ def get_conductor_detalle(
         "gestor": c.get("gestor", ""),
     }
 
+@router.get("/garantias/todas")
+def get_todas_garantias(
+    db = Depends(get_db),
+    _: str = Depends(verificar_token)
+):
+    docs = db.collection("garantias").stream()
+    return [{"matricula": d.id, **d.to_dict()} for d in docs]
+
+@router.get("/{matricula}/garantias")
+def get_garantias_vehiculo(
+    matricula: str,
+    db = Depends(get_db),
+    _: str = Depends(verificar_token)
+):
+    doc = db.collection("garantias").document(matricula.upper()).get()
+    if not doc.exists:
+        return {}
+    return doc.to_dict()
+
 @router.get("/{matricula}", response_model=schemas.VehiculoOut)
 def get_vehiculo(
     matricula: str,
