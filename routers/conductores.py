@@ -21,8 +21,8 @@ def _map(doc_id: str, d: dict, vehiculo_map: dict = None) -> dict:
         "fecha_nac":       d.get("fechaNacimiento", ""),
         "gestor":          d.get("gestor", ""),
         "empresa":         d.get("empresa", ""),
-        # vehiculo se resuelve desde el mapa vehicles.conductorActual
-        "vehiculo":        (vehiculo_map or {}).get(doc_id, ""),
+        # vehiculo se resuelve buscando por nombre en el mapa vehicles.conductorActual
+        "vehiculo":        (vehiculo_map or {}).get(d.get("nombre", ""), ""),
         # fechaAlta = Fecha Alta del sheet = fecha real de inicio
         "fecha_inicio":    d.get("fechaAlta", ""),
         # fechaIngreso = Fecha Prevista del sheet = fecha esperada de inicio
@@ -30,8 +30,8 @@ def _map(doc_id: str, d: dict, vehiculo_map: dict = None) -> dict:
         "fecha_baja":      d.get("fechaBaja", ""),
         # situacion = DEFINITIVO / PERDIDO / BAJA (equivale a codigo_socio)
         "codigo_socio":    d.get("situacion", ""),
-        # codigo = número de socio (campo CODIGO del sheet)
-        "num_socio":       d.get("codigo", ""),
+        # numTarjConductor = número de tarjeta/socio
+        "num_socio":       d.get("numTarjConductor", "") or d.get("codigo", ""),
         "direccion":       d.get("direccion", ""),
         "poblacion":       d.get("poblacion", ""),
         "codigo_postal":   d.get("codigoP", ""),
