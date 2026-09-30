@@ -1,0 +1,21 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches:
+      - claude/inspiring-meitner-fuqyyn
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 217.154.97.154
+          username: root
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            cd /var/www/gesticotrans/datacenter-backend
+            git pull origin claude/inspiring-meitner-fuqyyn
+            pm2 restart datacenter-backend
