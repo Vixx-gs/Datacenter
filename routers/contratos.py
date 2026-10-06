@@ -2,8 +2,22 @@ from fastapi import APIRouter, Query
 from typing import List, Optional
 import schemas
 import sheets_cache as sc
+import firestore_cache as fc
 
 router = APIRouter(prefix="/contratos", tags=["contratos"])
+
+def _build_clients_name_map() -> dict:
+    m: dict = {}
+    for doc_id, d in fc.get_clients():
+        nombre = d.get("nombre", "")
+        if nombre:
+            m[doc_id] = nombre
+    return m
+
+def _parece_id(s: str) -> bool:
+    if not s or s == "—":
+        return True
+    return " " not in s.strip() and s.replace("-", "").isalnum() and len(s) < 30
 
 
 @router.get("/", response_model=List[schemas.ContratoOut])
@@ -16,6 +30,7 @@ def get_contratos(
     Lee los contratos de alquiler directamente de Google Sheets (caché 5 min).
     """
     rows   = sc.get_contratos()
+    names_by_id = _build_clients_name_map()
     result = []
 
     for row in rows:
@@ -42,8 +57,8 @@ def get_contratos(
             "fianza":                sc.clean_float(row.get("Fianza", "")),
             "entrada":               sc.clean_float(row.get("Entrada", "")),
             "valor_residual":        sc.clean_float(row.get("ValorResidual", "")),
-            "nombre_conductor":      sc.clean(
-                row.get("NombreConductor", "") or row.get("Conductor", "")
+            "nombre_conductor":      (lambda raw: names_by_id.get(raw, raw) if _parece_id(raw) else raw)(
+                sc.clean(row.get("NombreConductor", "") or row.get("Conductor", "") or row.get("ClienteID", ""))
             ),
             "estado":                "ACTIVO",
             "created_at":            None,

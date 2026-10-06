@@ -41,13 +41,34 @@ def _map(doc_id: str, d: dict) -> dict:
         "updated_at":          None,
     }
 
+def _parece_id(s: str) -> bool:
+    if not s or s == "—":
+        return True
+    return " " not in s.strip() and s.replace("-", "").isalnum() and len(s) < 30
+
+def _build_clients_name_map() -> dict:
+    """Devuelve {doc_id: nombre} para todos los clientes en caché."""
+    m: dict = {}
+    for doc_id, d in fc.get_clients():
+        nombre = d.get("nombre", "")
+        if nombre:
+            m[doc_id] = nombre
+    return m
+
 def _build_conductores_activos_map() -> dict:
+    names_by_id = _build_clients_name_map()
     mapa: dict = {}
     for _, d in fc.get_driver_assignments():
         if d.get("fechaFin"):
             continue
-        vid  = d.get("vehicleId", "")
-        name = d.get("driverName", "") or d.get("driverId", "")
+        vid       = d.get("vehicleId", "")
+        raw_name  = d.get("driverName", "") or ""
+        driver_id = d.get("driverId", "") or ""
+        # Resolver nombre si parece un ID
+        if _parece_id(raw_name) and driver_id:
+            name = names_by_id.get(driver_id, raw_name or driver_id)
+        else:
+            name = raw_name or driver_id
         if vid and name:
             mapa.setdefault(vid, []).append(name)
     return {vid: ", ".join(names) for vid, names in mapa.items()}
@@ -141,24 +162,45 @@ def get_conductor_detalle(
     _: str = Depends(verificar_token)
 ):
     """Devuelve datos del conductor actual del vehículo."""
-    v_ref = db.collection("vehicles").document(matricula).get()
-    if not v_ref.exists:
-        return None
-    conductor_nombre = v_ref.to_dict().get("conductorActual", "")
+    # Obtener conductor actual desde driverAssignments (ya resuelto)
+    conductores_map = _build_conductores_activos_map()
+    conductor_nombre = conductores_map.get(matricula, "")
+
+    if not conductor_nombre:
+        # Fallback: campo conductorActual de Firestore
+        v_ref = db.collection("vehicles").document(matricula).get()
+        if not v_ref.exists:
+            return None
+        conductor_nombre = v_ref.to_dict().get("conductorActual", "")
     if not conductor_nombre:
         return None
-    # Buscar el conductor por nombre en la colección clients
+
+    # Buscar por nombre
     docs = list(db.collection("clients").where("nombre", "==", conductor_nombre).limit(1).stream())
-    if not docs:
-        return {"id": "", "nombre": conductor_nombre, "movil": "", "email": "", "gestor": ""}
-    c = docs[0].to_dict()
-    return {
-        "id":     docs[0].id,
-        "nombre": c.get("nombre", conductor_nombre),
-        "movil":  c.get("movil", ""),
-        "email":  c.get("email", ""),
-        "gestor": c.get("gestor", ""),
-    }
+    if docs:
+        c = docs[0].to_dict()
+        return {
+            "id":     docs[0].id,
+            "nombre": c.get("nombre", conductor_nombre),
+            "movil":  c.get("movil", ""),
+            "email":  c.get("email", ""),
+            "gestor": c.get("gestor", ""),
+        }
+
+    # Buscar por ID si el nombre parece un ID
+    if _parece_id(conductor_nombre):
+        client_doc = db.collection("clients").document(conductor_nombre).get()
+        if client_doc.exists:
+            c = client_doc.to_dict()
+            return {
+                "id":     client_doc.id,
+                "nombre": c.get("nombre", conductor_nombre),
+                "movil":  c.get("movil", ""),
+                "email":  c.get("email", ""),
+                "gestor": c.get("gestor", ""),
+            }
+
+    return {"id": "", "nombre": conductor_nombre, "movil": "", "email": "", "gestor": ""}
 
 @router.get("/garantias/todas")
 def get_todas_garantias(
@@ -188,7 +230,14 @@ def get_vehiculo(
     doc = db.collection("vehicles").document(matricula).get()
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
-    return _map(doc.id, doc.to_dict())
+    m = _map(doc.id, doc.to_dict())
+    # Resolver conductor actual desde driverAssignments
+    conductores_map = _build_conductores_activos_map()
+    conductor = conductores_map.get(matricula, "")
+    if conductor:
+        m["conductor_actual"] = conductor
+        m["tipo_conductor"]   = "actual"
+    return m
 
 @router.put("/{matricula}", response_model=schemas.VehiculoOut)
 def update_vehiculo(
