@@ -48,9 +48,34 @@ def _load_disk(key: str):
         return None
 
 
+def _json_default(obj):
+    """Convierte tipos Firestore no serializables a string."""
+    if hasattr(obj, "isoformat"):
+        return obj.isoformat()
+    if hasattr(obj, "_nanoseconds"):  # DatetimeWithNanoseconds
+        try:
+            return obj.isoformat()
+        except Exception:
+            return str(obj)
+    return str(obj)
+
+
+def _sanitize(obj):
+    """Recorre dict/list y convierte valores no serializables."""
+    if isinstance(obj, dict):
+        return {k: _sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize(v) for v in obj]
+    try:
+        json.dumps(obj)
+        return obj
+    except (TypeError, ValueError):
+        return _json_default(obj)
+
+
 def _save_disk(key: str, data: list):
     try:
-        payload = [{"id": doc_id, "data": d} for doc_id, d in data]
+        payload = [{"id": doc_id, "data": _sanitize(d)} for doc_id, d in data]
         tmp = _disk_file(key).with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         tmp.replace(_disk_file(key))
