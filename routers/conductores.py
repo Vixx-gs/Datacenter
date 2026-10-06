@@ -7,8 +7,20 @@ import firestore_cache as fc
 
 router = APIRouter(prefix="/conductores", tags=["conductores"])
 
+def _fecha_str(v) -> str:
+    """Convierte cualquier valor de fecha Firestore a 'YYYY-MM-DD' o ''."""
+    if not v:
+        return ""
+    if isinstance(v, str):
+        return v.split("T")[0].split(" ")[0].strip()
+    if hasattr(v, "strftime"):  # datetime / DatetimeWithNanoseconds
+        try:
+            return v.strftime("%Y-%m-%d")
+        except Exception:
+            return str(v).split("T")[0].split(" ")[0]
+    return str(v).split("T")[0].split(" ")[0]
+
 # Mapeo de un doc Firestore "clients" al formato de conductor del API
-# Firestore guarda las fechas en YYYY-MM-DD (cadena)
 def _map(doc_id: str, d: dict, vehiculo_map: dict = None) -> dict:
     return {
         "id":              doc_id,
@@ -18,16 +30,16 @@ def _map(doc_id: str, d: dict, vehiculo_map: dict = None) -> dict:
         "nif":             d.get("nif", "") or doc_id,
         "movil":           d.get("movil", ""),
         "email":           d.get("email", ""),
-        "fecha_nac":       d.get("fechaNacimiento", ""),
+        "fecha_nac":       _fecha_str(d.get("fechaNacimiento")),
         "gestor":          d.get("gestor", ""),
         "empresa":         d.get("empresa", ""),
         # vehiculo se resuelve buscando por nombre en el mapa vehicles.conductorActual
         "vehiculo":        (vehiculo_map or {}).get(d.get("nombre", ""), ""),
         # fechaAlta = Fecha Alta del sheet = fecha real de inicio
-        "fecha_inicio":    d.get("fechaAlta", ""),
+        "fecha_inicio":    _fecha_str(d.get("fechaAlta")),
         # fechaIngreso = Fecha Prevista del sheet = fecha esperada de inicio
-        "fecha_prevista":  d.get("fechaIngreso", ""),
-        "fecha_baja":      d.get("fechaBaja", ""),
+        "fecha_prevista":  _fecha_str(d.get("fechaIngreso")),
+        "fecha_baja":      _fecha_str(d.get("fechaBaja")),
         # situacion = DEFINITIVO / PERDIDO / BAJA (equivale a codigo_socio)
         "codigo_socio":    d.get("situacion", ""),
         # numTarjConductor = número de tarjeta/socio
@@ -114,8 +126,8 @@ def get_historial_vehiculos(
         {
             "vehiculo_id":  doc.to_dict().get("vehicleId", ""),
             "conductor_id": doc.to_dict().get("driverId", ""),
-            "fecha_inicio": doc.to_dict().get("fechaInicio", ""),
-            "fecha_fin":    doc.to_dict().get("fechaFin", ""),
+            "fecha_inicio": _fecha_str(doc.to_dict().get("fechaInicio")),
+            "fecha_fin":    _fecha_str(doc.to_dict().get("fechaFin")),
             "accion":       doc.to_dict().get("accion", ""),
         }
         for doc in docs

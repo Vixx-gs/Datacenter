@@ -7,6 +7,19 @@ import firestore_cache as fc
 
 router = APIRouter(prefix="/vehiculos", tags=["vehiculos"])
 
+def _fecha_str(v) -> str:
+    """Convierte cualquier valor de fecha Firestore a 'YYYY-MM-DD' o ''."""
+    if not v:
+        return ""
+    if isinstance(v, str):
+        return v.split("T")[0].split(" ")[0].strip()
+    if hasattr(v, "strftime"):
+        try:
+            return v.strftime("%Y-%m-%d")
+        except Exception:
+            return str(v).split("T")[0].split(" ")[0]
+    return str(v).split("T")[0].split(" ")[0]
+
 # Convierte un doc Firestore (camelCase) al formato del API (snake_case)
 def _map(doc_id: str, d: dict) -> dict:
     return {
@@ -14,20 +27,20 @@ def _map(doc_id: str, d: dict) -> dict:
         "marca":               d.get("marca", ""),
         "modelo":              d.get("modelo", ""),
         "bastidor":            d.get("bastidor", ""),
-        "fecha_mat":           d.get("fechaMat", ""),
+        "fecha_mat":           _fecha_str(d.get("fechaMat")),
         "destinado_a":         d.get("destinadoA", ""),
         "propiedad":           d.get("propiedad", ""),
         "situacion":           d.get("situacion", ""),
         "estado":              d.get("estado", "ACTIVO"),
-        "fecha_incorporacion": d.get("fechaIncorporacion", ""),
-        "itv":                 d.get("itv", ""),
-        "tacografo":           d.get("tacografo", ""),
+        "fecha_incorporacion": _fecha_str(d.get("fechaIncorporacion")),
+        "itv":                 _fecha_str(d.get("itv")),
+        "tacografo":           _fecha_str(d.get("tacografo")),
         "mantenimiento":       str(d.get("mantenimiento", "")),
-        "fecha_fin_mto":       d.get("fechaFinMto", ""),
+        "fecha_fin_mto":       _fecha_str(d.get("fechaFinMto")),
         "km_fin_mto":          str(d.get("kmFinMto", "") if d.get("kmFinMto") else ""),
         "precio_mto":          str(d.get("precioMto", "") if d.get("precioMto") else ""),
         "garantia":            str(d.get("garantia", "")),
-        "fecha_fin_garantia":  d.get("fechaFinGarantia", ""),
+        "fecha_fin_garantia":  _fecha_str(d.get("fechaFinGarantia")),
         "km_fin_garantia":     str(d.get("kmFinGarantia", "") if d.get("kmFinGarantia") else ""),
         "kilometros":          str(d.get("kilometros", "") if d.get("kilometros") else ""),
         "gps":                 d.get("gps", ""),
@@ -126,8 +139,8 @@ def get_historial_vehiculo(
             "vehiculo_id":  d.get("vehicleId", ""),
             "conductor_id": driver_id,
             "nombre":       driver_name,
-            "fecha_inicio": d.get("fechaInicio", ""),
-            "fecha_fin":    d.get("fechaFin", ""),
+            "fecha_inicio": _fecha_str(d.get("fechaInicio")),
+            "fecha_fin":    _fecha_str(d.get("fechaFin")),
             "accion":       d.get("accion", ""),
         })
         if parece_id(driver_name) and driver_id:
