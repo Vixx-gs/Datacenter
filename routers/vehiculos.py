@@ -100,7 +100,7 @@ def _build_conductores_activos_map() -> dict:
             name = raw_name or driver_id
         if vid and name:
             mapa.setdefault(vid, []).append(name)
-    return {vid: ", ".join(names) for vid, names in mapa.items()}
+    return {vid: ", ".join(dict.fromkeys(names)) for vid, names in mapa.items()}
 
 @router.get("/", response_model=List[schemas.VehiculoOut])
 def get_vehiculos(
