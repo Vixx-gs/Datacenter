@@ -47,16 +47,16 @@ def _map(doc_id: str, d: dict, vehiculo_map: dict = None) -> dict:
         "nif":             d.get("nif", "") or doc_id,
         "movil":           d.get("movil", ""),
         "email":           d.get("email", ""),
-        "fecha_nac":       _fecha_es(d.get("fechaNacimiento")),
+        "fecha_nac":       _fecha_str(d.get("fechaNacimiento")),
         "gestor":          d.get("gestor", ""),
         "empresa":         d.get("empresa", ""),
         # vehiculo se resuelve buscando por nombre en el mapa vehicles.conductorActual
         "vehiculo":        (vehiculo_map or {}).get(d.get("nombre", ""), ""),
         # fechaAlta = Fecha Alta del sheet = fecha real de inicio
-        "fecha_inicio":    _fecha_es(d.get("fechaAlta")),
+        "fecha_inicio":    _fecha_str(d.get("fechaAlta")),
         # fechaIngreso = Fecha Prevista del sheet = fecha esperada de inicio
-        "fecha_prevista":  _fecha_es(d.get("fechaIngreso")),
-        "fecha_baja":      _fecha_es(d.get("fechaBaja")),
+        "fecha_prevista":  _fecha_str(d.get("fechaIngreso")),
+        "fecha_baja":      _fecha_str(d.get("fechaBaja")),
         # situacion = DEFINITIVO / PERDIDO / BAJA (equivale a codigo_socio)
         "codigo_socio":    d.get("situacion", ""),
         # codigo = número de tarjeta/socio (S00008, etc.)
@@ -145,17 +145,11 @@ def get_historial_vehiculos(
             "conductor_id": doc.to_dict().get("driverId", ""),
             "fecha_inicio": _fecha_str(doc.to_dict().get("fechaInicio")),
             "fecha_fin":    _fecha_str(doc.to_dict().get("fechaFin")),
-            "fecha_inicio_es": _fecha_es(doc.to_dict().get("fechaInicio")),
-            "fecha_fin_es":    _fecha_es(doc.to_dict().get("fechaFin")),
             "accion":       doc.to_dict().get("accion", ""),
         }
         for doc in docs
     ]
     registros.sort(key=lambda x: x["fecha_inicio"] or "", reverse=True)
-    # Reemplazar por campos ES para que el frontend muestre DD/MM/YYYY
-    for r in registros:
-        r["fecha_inicio"] = r.pop("fecha_inicio_es")
-        r["fecha_fin"]    = r.pop("fecha_fin_es")
     return registros
 
 @router.get("/{id}", response_model=schemas.ConductorOut2)

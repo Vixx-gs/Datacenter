@@ -85,6 +85,7 @@ def _build_clients_name_map() -> dict:
     return m
 
 def _build_conductores_activos_map() -> dict:
+    """Devuelve {vehiculo_id: nombre_conductor} para conductores activos."""
     names_by_id = _build_clients_name_map()
     mapa: dict = {}
     for _, d in fc.get_driver_assignments():
@@ -93,7 +94,6 @@ def _build_conductores_activos_map() -> dict:
         vid       = d.get("vehicleId", "")
         raw_name  = d.get("driverName", "") or ""
         driver_id = d.get("driverId", "") or ""
-        # Resolver nombre si parece un ID
         if _parece_id(raw_name) and driver_id:
             name = names_by_id.get(driver_id, raw_name or driver_id)
         else:
@@ -101,6 +101,18 @@ def _build_conductores_activos_map() -> dict:
         if vid and name:
             mapa.setdefault(vid, []).append(name)
     return {vid: ", ".join(dict.fromkeys(names)) for vid, names in mapa.items()}
+
+def _build_conductor_id_map() -> dict:
+    """Devuelve {vehiculo_id: driver_id} para el conductor activo más reciente."""
+    ids: dict = {}
+    for _, d in fc.get_driver_assignments():
+        if d.get("fechaFin"):
+            continue
+        vid       = d.get("vehicleId", "")
+        driver_id = d.get("driverId", "") or ""
+        if vid and driver_id and vid not in ids:
+            ids[vid] = driver_id
+    return ids
 
 @router.get("/", response_model=List[schemas.VehiculoOut])
 def get_vehiculos(
@@ -154,10 +166,11 @@ def get_historial_vehiculo(
             "id":           doc.id,
             "vehiculo_id":  d.get("vehicleId", ""),
             "conductor_id": driver_id,
+            "cliente_id":   driver_id,   # alias para el routerLink del frontend
             "nombre":       driver_name,
             "_sort_inicio": _fecha_str(d.get("fechaInicio")),
-            "fecha_inicio": _fecha_es(d.get("fechaInicio")),
-            "fecha_fin":    _fecha_es(d.get("fechaFin")),
+            "fecha_inicio": _fecha_str(d.get("fechaInicio")),  # YYYY-MM-DD; pipe fechaEs lo muestra
+            "fecha_fin":    _fecha_str(d.get("fechaFin")),      # YYYY-MM-DD; pipe fechaEs lo muestra
             "accion":       d.get("accion", ""),
         })
         if parece_id(driver_name) and driver_id:
@@ -263,12 +276,13 @@ def get_vehiculo(
     if not doc.exists:
         raise HTTPException(status_code=404, detail="Vehículo no encontrado")
     m = _map(doc.id, doc.to_dict())
-    # Resolver conductor actual desde driverAssignments
     conductores_map = _build_conductores_activos_map()
+    conductor_id_map = _build_conductor_id_map()
     conductor = conductores_map.get(matricula, "")
     if conductor:
-        m["conductor_actual"] = conductor
-        m["tipo_conductor"]   = "actual"
+        m["conductor_actual"]    = conductor
+        m["conductor_actual_id"] = conductor_id_map.get(matricula, "")
+        m["tipo_conductor"]      = "actual"
     return m
 
 @router.put("/{matricula}", response_model=schemas.VehiculoOut)
