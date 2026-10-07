@@ -42,8 +42,8 @@ def _map(doc_id: str, d: dict, vehiculo_map: dict = None) -> dict:
         "fecha_baja":      _fecha_str(d.get("fechaBaja")),
         # situacion = DEFINITIVO / PERDIDO / BAJA (equivale a codigo_socio)
         "codigo_socio":    d.get("situacion", ""),
-        # numTarjConductor = número de tarjeta/socio
-        "num_socio":       d.get("numTarjConductor", "") or d.get("codigo", ""),
+        # codigo = número de tarjeta/socio (S00008, etc.)
+        "num_socio":       d.get("codigo", "") or d.get("numTarjConductor", ""),
         "direccion":       d.get("direccion", ""),
         "poblacion":       d.get("poblacion", ""),
         "codigo_postal":   d.get("codigoP", ""),
