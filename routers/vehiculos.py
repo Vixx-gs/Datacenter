@@ -12,13 +12,29 @@ def _fecha_str(v) -> str:
     if not v:
         return ""
     if isinstance(v, str):
-        return v.split("T")[0].split(" ")[0].strip()
+        s = v.split("T")[0].split(" ")[0].strip()
+        import re
+        if re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", s):
+            parts = s.split("/")
+            return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+        return s
     if hasattr(v, "strftime"):
         try:
             return v.strftime("%Y-%m-%d")
         except Exception:
             return str(v).split("T")[0].split(" ")[0]
     return str(v).split("T")[0].split(" ")[0]
+
+def _fecha_es(v) -> str:
+    """Devuelve la fecha en formato DD/MM/YYYY para mostrar en el frontend."""
+    s = _fecha_str(v)
+    if not s:
+        return ""
+    import re
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        a, m, d = s.split("-")
+        return f"{d}/{m}/{a}"
+    return s
 
 # Convierte un doc Firestore (camelCase) al formato del API (snake_case)
 def _map(doc_id: str, d: dict) -> dict:
@@ -27,20 +43,20 @@ def _map(doc_id: str, d: dict) -> dict:
         "marca":               d.get("marca", ""),
         "modelo":              d.get("modelo", ""),
         "bastidor":            d.get("bastidor", ""),
-        "fecha_mat":           _fecha_str(d.get("fechaMat")),
+        "fecha_mat":           _fecha_es(d.get("fechaMat")),
         "destinado_a":         d.get("destinadoA", ""),
         "propiedad":           d.get("propiedad", ""),
         "situacion":           d.get("situacion", ""),
         "estado":              d.get("estado", "ACTIVO"),
-        "fecha_incorporacion": _fecha_str(d.get("fechaIncorporacion")),
-        "itv":                 _fecha_str(d.get("itv")),
-        "tacografo":           _fecha_str(d.get("tacografo")),
+        "fecha_incorporacion": _fecha_es(d.get("fechaIncorporacion")),
+        "itv":                 _fecha_es(d.get("itv")),
+        "tacografo":           _fecha_es(d.get("tacografo")),
         "mantenimiento":       str(d.get("mantenimiento", "")),
-        "fecha_fin_mto":       _fecha_str(d.get("fechaFinMto")),
+        "fecha_fin_mto":       _fecha_es(d.get("fechaFinMto")),
         "km_fin_mto":          str(d.get("kmFinMto", "") if d.get("kmFinMto") else ""),
         "precio_mto":          str(d.get("precioMto", "") if d.get("precioMto") else ""),
         "garantia":            str(d.get("garantia", "")),
-        "fecha_fin_garantia":  _fecha_str(d.get("fechaFinGarantia")),
+        "fecha_fin_garantia":  _fecha_es(d.get("fechaFinGarantia")),
         "km_fin_garantia":     str(d.get("kmFinGarantia", "") if d.get("kmFinGarantia") else ""),
         "kilometros":          str(d.get("kilometros", "") if d.get("kilometros") else ""),
         "gps":                 d.get("gps", ""),
@@ -139,8 +155,9 @@ def get_historial_vehiculo(
             "vehiculo_id":  d.get("vehicleId", ""),
             "conductor_id": driver_id,
             "nombre":       driver_name,
-            "fecha_inicio": _fecha_str(d.get("fechaInicio")),
-            "fecha_fin":    _fecha_str(d.get("fechaFin")),
+            "_sort_inicio": _fecha_str(d.get("fechaInicio")),
+            "fecha_inicio": _fecha_es(d.get("fechaInicio")),
+            "fecha_fin":    _fecha_es(d.get("fechaFin")),
             "accion":       d.get("accion", ""),
         })
         if parece_id(driver_name) and driver_id:
@@ -165,7 +182,9 @@ def get_historial_vehiculo(
         if not r["nombre"] or r["nombre"] == "—":
             r["nombre"] = "—"
 
-    raw.sort(key=lambda x: x["fecha_inicio"] or "", reverse=True)
+    raw.sort(key=lambda x: x["_sort_inicio"] or "", reverse=True)
+    for r in raw:
+        r.pop("_sort_inicio", None)
     return raw
 
 @router.get("/{matricula}/conductor-detalle")

@@ -13,6 +13,18 @@ def parse_fecha(f: str):
         except: pass
     return None
 
+def _fecha_es(v) -> str:
+    import re
+    if not v:
+        return ""
+    s = str(v).split("T")[0].split(" ")[0].strip()
+    if re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", s):
+        return s
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        a, m, d = s.split("-")
+        return f"{d}/{m}/{a}"
+    return s
+
 def _all_assignments(db) -> list:
     return [
         {
@@ -44,7 +56,11 @@ def get_entradas(
         if ff and ff <= hoy: continue
         filtrados.append(r)
 
-    return sorted(filtrados, key=lambda x: x["fecha_inicio"] or "", reverse=True)
+    out = sorted(filtrados, key=lambda x: x["fecha_inicio"] or "", reverse=True)
+    for r in out:
+        r["fecha_inicio"] = _fecha_es(r["fecha_inicio"])
+        r["fecha_fin"]    = _fecha_es(r["fecha_fin"])
+    return out
 
 @router.get("/salidas")
 def get_salidas(
@@ -72,4 +88,9 @@ def get_salidas(
         if r["vehiculo_id"] in vehiculos_con_entrada_activa: continue
         filtrados.append({**r, "fecha": r["fecha_fin"]})
 
-    return sorted(filtrados, key=lambda x: x["fecha"] or "", reverse=True)
+    out = sorted(filtrados, key=lambda x: x["fecha"] or "", reverse=True)
+    for r in out:
+        r["fecha_inicio"] = _fecha_es(r["fecha_inicio"])
+        r["fecha_fin"]    = _fecha_es(r["fecha_fin"])
+        r["fecha"]        = _fecha_es(r["fecha"])
+    return out

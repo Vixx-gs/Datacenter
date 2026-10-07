@@ -16,6 +16,19 @@ def parse_fecha(f: str):
         except: pass
     return None
 
+def _fecha_es(v) -> str:
+    """Normaliza cualquier formato de fecha a DD/MM/YYYY."""
+    if not v:
+        return ""
+    import re
+    s = str(v).split("T")[0].split(" ")[0].strip()
+    if re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", s):
+        return s
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+        a, m, d = s.split("-")
+        return f"{d}/{m}/{a}"
+    return s
+
 def _map_taller(doc_id: str, d: dict) -> dict:
     return {
         "id":               doc_id,
@@ -31,9 +44,10 @@ def _map_entrada(doc_id: str, d: dict) -> dict:
         "matricula":     d.get("matricula", ""),
         "taller_id":     d.get("tallerId", ""),
         "taller_nombre": d.get("tallerNombre", ""),
-        "fecha_entrada": d.get("fechaEntrada", ""),
-        "fecha_prevista":d.get("fechaPrevistaFin", ""),
-        "fecha_fin":     d.get("fechaFin", ""),
+        "_sort_entrada":  d.get("fechaEntrada", "") or "",
+        "fecha_entrada": _fecha_es(d.get("fechaEntrada", "")),
+        "fecha_prevista":_fecha_es(d.get("fechaPrevistaFin", "")),
+        "fecha_fin":     _fecha_es(d.get("fechaFin", "")),
         "tipo_averia":   d.get("tipoAveria", ""),
         "notas":         d.get("notas", ""),
         "created_at":    None,
@@ -58,7 +72,9 @@ def get_entradas(
         if matricula and d.get("matricula", "") != matricula:
             continue
         registros.append(_map_entrada(doc_id, d))
-    registros.sort(key=lambda x: x["fecha_entrada"] or "", reverse=True)
+    registros.sort(key=lambda x: x["_sort_entrada"] or "", reverse=True)
+    for r in registros:
+        r.pop("_sort_entrada", None)
 
     if activos:
         hoy = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
