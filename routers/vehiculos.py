@@ -85,34 +85,45 @@ def _build_clients_name_map() -> dict:
     return m
 
 def _build_conductores_activos_map() -> dict:
-    """Devuelve {vehiculo_id: nombre_conductor} para conductores activos."""
+    """Devuelve {vehiculo_id: nombre_del_conductor_mas_reciente} para conductores activos."""
     names_by_id = _build_clients_name_map()
-    mapa: dict = {}
+    # Por vehículo, guardar el registro activo con fecha_inicio más reciente
+    mejor: dict = {}  # vid -> {"name": str, "fecha": str, "driver_id": str}
     for _, d in fc.get_driver_assignments():
         if d.get("fechaFin"):
             continue
         vid       = d.get("vehicleId", "")
         raw_name  = d.get("driverName", "") or ""
         driver_id = d.get("driverId", "") or ""
+        fecha     = _fecha_str(d.get("fechaInicio")) or ""
+        if not vid:
+            continue
+        # Resolver nombre real si parece un ID
         if _parece_id(raw_name) and driver_id:
             name = names_by_id.get(driver_id, raw_name or driver_id)
         else:
             name = raw_name or driver_id
-        if vid and name:
-            mapa.setdefault(vid, []).append(name)
-    return {vid: ", ".join(dict.fromkeys(names)) for vid, names in mapa.items()}
+        if not name:
+            continue
+        # Quedarse con el registro de fecha más reciente
+        if vid not in mejor or fecha > mejor[vid]["fecha"]:
+            mejor[vid] = {"name": name, "fecha": fecha, "driver_id": driver_id}
+    return {vid: v["name"] for vid, v in mejor.items()}
 
 def _build_conductor_id_map() -> dict:
-    """Devuelve {vehiculo_id: driver_id} para el conductor activo más reciente."""
-    ids: dict = {}
+    """Devuelve {vehiculo_id: driver_id} del conductor activo más reciente."""
+    mejor: dict = {}  # vid -> {"driver_id": str, "fecha": str}
     for _, d in fc.get_driver_assignments():
         if d.get("fechaFin"):
             continue
         vid       = d.get("vehicleId", "")
         driver_id = d.get("driverId", "") or ""
-        if vid and driver_id and vid not in ids:
-            ids[vid] = driver_id
-    return ids
+        fecha     = _fecha_str(d.get("fechaInicio")) or ""
+        if not vid or not driver_id:
+            continue
+        if vid not in mejor or fecha > mejor[vid]["fecha"]:
+            mejor[vid] = {"driver_id": driver_id, "fecha": fecha}
+    return {vid: v["driver_id"] for vid, v in mejor.items()}
 
 @router.get("/", response_model=List[schemas.VehiculoOut])
 def get_vehiculos(
