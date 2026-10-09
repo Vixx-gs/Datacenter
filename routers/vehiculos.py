@@ -76,18 +76,38 @@ def _parece_id(s: str) -> bool:
     return " " not in s.strip() and s.replace("-", "").isalnum() and len(s) < 30
 
 def _build_clients_name_map() -> dict:
-    """Devuelve {doc_id: nombre} para todos los clientes en caché."""
+    """Devuelve {doc_id: nombre_upper} y {prefix8: nombre_upper} para todos los clientes."""
     m: dict = {}
+    prefix_m: dict = {}
     for doc_id, d in fc.get_clients():
-        nombre = d.get("nombre", "")
+        nombre = (d.get("nombre", "") or "").strip().upper()
         if nombre:
             m[doc_id] = nombre
+            # índice por los primeros 8 caracteres del doc_id para IDs cortos
+            if len(doc_id) >= 8:
+                prefix_m.setdefault(doc_id[:8], nombre)
+    m["__prefix__"] = prefix_m  # type: ignore
     return m
+
+def _resolver_nombre(raw_name: str, driver_id: str, names_by_id: dict) -> str:
+    """Devuelve el nombre real en MAYÚSCULAS a partir de un driverName o driverId."""
+    prefix_m = names_by_id.get("__prefix__", {})
+    if not _parece_id(raw_name):
+        return raw_name.strip().upper()
+    # Búsqueda exacta por driver_id
+    if driver_id in names_by_id:
+        return names_by_id[driver_id]
+    # Búsqueda por prefijo (IDs cortos tipo "172e3bdc")
+    if driver_id and len(driver_id) >= 8:
+        hit = prefix_m.get(driver_id[:8])
+        if hit:
+            return hit
+    # Fallback: si el raw_name no está vacío, devolverlo en mayús
+    return (raw_name or driver_id or "").strip().upper()
 
 def _build_conductores_activos_map() -> dict:
     """Devuelve {vehiculo_id: nombre_del_conductor_mas_reciente} para conductores activos."""
     names_by_id = _build_clients_name_map()
-    # Por vehículo, guardar el registro activo con fecha_inicio más reciente
     mejor: dict = {}  # vid -> {"name": str, "fecha": str, "driver_id": str}
     for _, d in fc.get_driver_assignments():
         if d.get("fechaFin"):
@@ -98,14 +118,9 @@ def _build_conductores_activos_map() -> dict:
         fecha     = _fecha_str(d.get("fechaInicio")) or ""
         if not vid:
             continue
-        # Resolver nombre real si parece un ID
-        if _parece_id(raw_name) and driver_id:
-            name = names_by_id.get(driver_id, raw_name or driver_id)
-        else:
-            name = raw_name or driver_id
+        name = _resolver_nombre(raw_name, driver_id, names_by_id)
         if not name:
             continue
-        # Quedarse con el registro de fecha más reciente
         if vid not in mejor or fecha > mejor[vid]["fecha"]:
             mejor[vid] = {"name": name, "fecha": fecha, "driver_id": driver_id}
     return {vid: v["name"] for vid, v in mejor.items()}
@@ -199,12 +214,14 @@ def get_historial_vehiculo(
             if hits:
                 nombres_por_id[driver_id] = hits[0].to_dict().get("nombre", driver_id)
 
-    # Aplicar nombres resueltos
+    # Aplicar nombres resueltos y convertir a MAYÚSCULAS
     for r in raw:
         if parece_id(r["nombre"]) and r["conductor_id"] in nombres_por_id:
             r["nombre"] = nombres_por_id[r["conductor_id"]]
         if not r["nombre"] or r["nombre"] == "—":
             r["nombre"] = "—"
+        else:
+            r["nombre"] = r["nombre"].strip().upper()
 
     raw.sort(key=lambda x: x["_sort_inicio"] or "", reverse=True)
     for r in raw:
