@@ -28,6 +28,30 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         )
         return response
 
+# ── Autenticación: toda la API exige token salvo login/logout/health ──
+# Misma comprobación que la dependencia verificar_token (incluido el horario),
+# aplicada a todas las rutas para que ninguna quede abierta por olvido.
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials
+from auth import verificar_token
+
+RUTAS_PUBLICAS = {"/auth/login", "/auth/logout", "/health"}
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS" or request.url.path in RUTAS_PUBLICAS:
+            return await call_next(request)
+        authorization = request.headers.get("authorization", "")
+        if not authorization.startswith("Bearer "):
+            return JSONResponse({"detail": "No autorizado"}, status_code=401)
+        try:
+            verificar_token(HTTPAuthorizationCredentials(scheme="Bearer", credentials=authorization[7:]))
+        except HTTPException as e:
+            return JSONResponse({"detail": e.detail}, status_code=e.status_code)
+        return await call_next(request)
+
+app.add_middleware(AuthMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 # ── CORS estricto ─────────────────────────────────────────────
@@ -35,6 +59,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://datacenter.gesticotrans.com",
+        "https://datacenter.gesticotrans.app",
         "http://localhost:4200",  # solo para desarrollo local
     ],
     allow_credentials=True,
