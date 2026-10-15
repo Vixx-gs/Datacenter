@@ -13,6 +13,7 @@ class LoginResponse(BaseModel):
     token: str
     usuario: str
     expira: str
+    rol: str | None = None   # rol en el portal (solo en SSO): admin | gestorT | gestor
 
 @router.post("/login", response_model=LoginResponse)
 def login(body: LoginRequest, request: Request):
@@ -80,6 +81,7 @@ def sso(request: Request):
         "token":   crear_token(me["username"], sin_horario=sin_horario),
         "usuario": me.get("nombre") or me["username"],
         "expira":  expira,
+        "rol":     role,
     }
 
 @router.post("/logout")
