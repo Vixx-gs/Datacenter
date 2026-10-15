@@ -57,17 +57,22 @@ PORTAL_COOKIE = "__Secure-gt_session"
 ROLES = {"admin", "gestorT", "gestor"}
 ROLES_SIN_HORARIO = {"admin", "gestorT"}   # "gestor" solo de 8:00 a 18:00
 
+class SsoRequest(BaseModel):
+    launch: str | None = None
+
 @router.post("/sso", response_model=LoginResponse)
-def sso(request: Request):
+def sso(body: SsoRequest, request: Request):
+    # Solo con el pase que da el portal al pulsar la tarjeta de Datacenter.
     cookie = request.cookies.get(PORTAL_COOKIE)
-    if not cookie:
-        raise HTTPException(status_code=401, detail="No has iniciado sesión en el portal.")
+    if not cookie or not body.launch:
+        raise HTTPException(status_code=401, detail="Entra desde el Portal del Empleado.")
     try:
-        r = requests.get(f"{PORTAL_URL}/api/me", cookies={PORTAL_COOKIE: cookie}, timeout=8)
+        r = requests.post(f"{PORTAL_URL}/api/sso/verify", cookies={PORTAL_COOKIE: cookie},
+                          json={"launch": body.launch, "app": "datacenter"}, timeout=8)
     except requests.RequestException:
         raise HTTPException(status_code=502, detail="El portal no responde.")
     if r.status_code in (401, 403):
-        raise HTTPException(status_code=401, detail="La sesión del portal no es válida.")
+        raise HTTPException(status_code=401, detail="Entra desde el Portal del Empleado.")
     if not r.ok:
         raise HTTPException(status_code=502, detail="El portal no responde.")
     me = r.json()
