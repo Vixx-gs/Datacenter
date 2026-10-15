@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from auth import verificar_token
 
-RUTAS_PUBLICAS = {"/auth/login", "/auth/logout", "/health"}
+RUTAS_PUBLICAS = {"/auth/login", "/auth/sso", "/auth/logout", "/health"}
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

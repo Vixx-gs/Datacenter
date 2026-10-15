@@ -50,9 +50,12 @@ def verificar_credenciales(usuario: str, password: str) -> bool:
 def es_sin_horario(usuario: str) -> bool:
     return USUARIOS.get(usuario, {}).get("sin_horario", False)
 
-def crear_token(usuario: str) -> str:
+def crear_token(usuario: str, sin_horario: bool | None = None) -> str:
+    # sin_horario explícito para usuarios del portal (no están en USUARIOS).
+    if sin_horario is None:
+        sin_horario = es_sin_horario(usuario)
     ahora = datetime.now(timezone.utc)
-    if es_sin_horario(usuario):
+    if sin_horario:
         expiracion = ahora + timedelta(hours=24)
     else:
         hoy_18     = ahora.replace(hour=HORA_FIN, minute=0, second=0, microsecond=0)
@@ -62,7 +65,7 @@ def crear_token(usuario: str) -> str:
         "sub": usuario,
         "iat": ahora,
         "exp": expiracion,
-        "sin_horario": es_sin_horario(usuario),
+        "sin_horario": sin_horario,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
