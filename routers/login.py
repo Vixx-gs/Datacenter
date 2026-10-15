@@ -17,6 +17,10 @@ class LoginResponse(BaseModel):
 
 @router.post("/login", response_model=LoginResponse)
 def login(body: LoginRequest, request: Request):
+    # En *.gesticotrans.app solo se entra por el Portal del Empleado.
+    host = request.headers.get("x-forwarded-host", request.headers.get("host", ""))
+    if host.split(",")[0].strip().endswith(".gesticotrans.app"):
+        raise HTTPException(status_code=403, detail="Entra desde el Portal del Empleado: https://gesticotrans.app")
     # Solo verificar horario si NO es un usuario sin restricción
     if not es_sin_horario(body.usuario):
         verificar_horario()
